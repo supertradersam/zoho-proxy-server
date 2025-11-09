@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const cheerio = require('cheerio');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -161,6 +162,161 @@ app.post('/api/refresh-zoho-token', async (req, res) => {
         error: 'internal_error',
         error_description: error.message || 'Internal server error'
       }
+    });
+  }
+});
+
+// Endpoint to fetch ForexFactory calendar events
+app.get('/api/forexfactory-calendar', async (req, res) => {
+  try {
+    const { date } = req.query;
+    const targetDate = date || new Date().toISOString().split('T')[0];
+    
+    // ForexFactory calendar URL
+    const url = `https://www.forexfactory.com/calendar?day=${targetDate}`;
+    
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+    
+    const $ = cheerio.load(response.data);
+    const events = [];
+    
+    // Try multiple selectors for ForexFactory calendar table
+    // ForexFactory uses different class names, so we try multiple patterns
+    const selectors = [
+      '.calendar__row',
+      '.ff-cal-event',
+      'tr.ff-cal-event',
+      'table.calendar tr',
+      '#calendar tr'
+    ];
+    
+    let rows = [];
+    for (const selector of selectors) {
+      rows = $(selector);
+      if (rows.length > 0) break;
+    }
+    
+    rows.each((index, element) => {
+      const $row = $(element);
+      
+      // Skip header rows
+      if ($row.hasClass('calendar__row--header') || 
+          $row.find('th').length > 0 ||
+          $row.text().trim().toLowerCase().includes('time')) {
+        return;
+      }
+      
+      // Try multiple selectors for each field
+      const time = $row.find('.calendar__time, .ff-cal-time, td:first-child').first().text().trim();
+      const currency = $row.find('.calendar__currency, .ff-cal-currency, td:nth-child(2)').first().text().trim();
+      const impactElement = $row.find('.calendar__impact, .ff-cal-impact, td:nth-child(3)').first();
+      const impact = impactElement.attr('class') || impactElement.attr('title') || '';
+      const event = $row.find('.calendar__event, .ff-cal-event-name, td:nth-child(4)').first().text().trim();
+      const actual = $row.find('.calendar__actual, .ff-cal-actual, td:nth-child(5)').first().text().trim();
+      const forecast = $row.find('.calendar__forecast, .ff-cal-forecast, td:nth-child(6)').first().text().trim();
+      const previous = $row.find('.calendar__previous, .ff-cal-previous, td:nth-child(7)').first().text().trim();
+      
+      // Determine priority from impact class or color
+      let priority = 'Low';
+      const impactLower = impact.toLowerCase();
+      if (impactLower.includes('high') || impactLower.includes('red') || impactLower.includes('3')) {
+        priority = 'High';
+      } else if (impactLower.includes('medium') || impactLower.includes('orange') || 
+                 impactLower.includes('yellow') || impactLower.includes('2')) {
+        priority = 'Medium';
+      }
+      
+      // Also check for impact indicators in the row
+      const rowClass = $row.attr('class') || '';
+      if (rowClass.includes('high') || rowClass.includes('red')) priority = 'High';
+      else if (rowClass.includes('medium') || rowClass.includes('orange') || rowClass.includes('yellow')) priority = 'Medium';
+      
+      if (event && event.length > 0) {
+        events.push({
+          id: `ff_${index}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          title: event,
+          time: time || 'TBD',
+          date: targetDate,
+          currency: currency || 'N/A',
+          impact: priority,
+          actual: actual || '',
+          forecast: forecast || '',
+          previous: previous || '',
+          description: `${currency || 'N/A'} - ${event}`
+        });
+      }
+    });
+    
+    return res.json({ events, date: targetDate });
+  } catch (error) {
+    console.error('ForexFactory Calendar Error:', error);
+    
+    if (error.response) {
+      return res.status(error.response.status).json({
+        error: error.message,
+        events: []
+      });
+    }
+    
+    return res.status(500).json({
+      error: error.message || 'Failed to fetch ForexFactory calendar',
+      events: []
+    });
+  }
+});
+
+// Endpoint to fetch market news from various sources
+app.get('/api/market-news', async (req, res) => {
+  try {
+    const { source } = req.query;
+    
+    // For now, return mock data structure
+    // In production, you would integrate with actual news APIs like:
+    // - NewsAPI.org
+    // - Alpha Vantage
+    // - Financial Modeling Prep
+    // - RSS feeds from financial news sites
+    
+    const articles = [];
+    
+    // Mock structure for different sources
+    if (source === 'investing') {
+      // Would fetch from Investing.com RSS or API
+      articles.push({
+        title: 'Futures Market Update',
+        description: 'Latest updates from futures markets',
+        url: 'https://www.investing.com/economic-calendar/',
+        publishedAt: new Date().toISOString()
+      });
+    } else if (source === 'marketwatch') {
+      // Would fetch from MarketWatch RSS or API
+      articles.push({
+        title: 'Stock Market News',
+        description: 'Breaking news from stock markets',
+        url: 'https://www.marketwatch.com/markets',
+        publishedAt: new Date().toISOString()
+      });
+    } else if (source === 'bloomberg') {
+      // Would fetch from Bloomberg RSS or API
+      articles.push({
+        title: 'Bloomberg Markets Update',
+        description: 'Latest Bloomberg market analysis',
+        url: 'https://www.bloomberg.com/markets',
+        publishedAt: new Date().toISOString()
+      });
+    }
+    
+    return res.json({ articles, source });
+  } catch (error) {
+    console.error('Market News Error:', error);
+    
+    return res.status(500).json({
+      error: error.message || 'Failed to fetch market news',
+      articles: []
     });
   }
 });

@@ -87,14 +87,24 @@ app.post('/api/refresh-zoho-token', async (req, res) => {
     console.error('Token Refresh Error:', error);
     
     if (error.response) {
+      // Return the actual error from Zoho
+      const zohoError = error.response.data;
+      console.error('Zoho API Error:', zohoError);
       return res.status(error.response.status).json({
-        error: error.response.data || error.message,
+        error: {
+          error: zohoError.error || 'unknown_error',
+          error_description: zohoError.error_description || zohoError.message || 'Unknown error from Zoho',
+          ...zohoError
+        },
         status: error.response.status
       });
     }
 
     return res.status(500).json({
-      error: error.message || 'Internal server error'
+      error: {
+        error: 'internal_error',
+        error_description: error.message || 'Internal server error'
+      }
     });
   }
 });

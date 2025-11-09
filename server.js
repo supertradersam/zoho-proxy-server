@@ -57,6 +57,58 @@ app.post('/api/zoho-books-proxy', async (req, res) => {
   }
 });
 
+// Endpoint to exchange authorization code for tokens
+app.post('/api/exchange-zoho-code', async (req, res) => {
+  try {
+    const { code, client_id, client_secret, redirect_uri } = req.body;
+
+    if (!code || !client_id || !client_secret) {
+      return res.status(400).json({ 
+        error: 'code, client_id, and client_secret are required' 
+      });
+    }
+
+    const url = 'https://accounts.zoho.com/oauth/v2/token';
+    const params = new URLSearchParams({
+      code: code,
+      client_id: client_id,
+      client_secret: client_secret,
+      grant_type: 'authorization_code',
+      ...(redirect_uri && { redirect_uri: redirect_uri })
+    });
+
+    const response = await axios.post(url, params.toString(), {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    });
+
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    console.error('Code Exchange Error:', error);
+    
+    if (error.response) {
+      const zohoError = error.response.data;
+      console.error('Zoho API Error:', zohoError);
+      return res.status(error.response.status).json({
+        error: {
+          error: zohoError.error || 'unknown_error',
+          error_description: zohoError.error_description || zohoError.message || 'Unknown error from Zoho',
+          ...zohoError
+        },
+        status: error.response.status
+      });
+    }
+
+    return res.status(500).json({
+      error: {
+        error: 'internal_error',
+        error_description: error.message || 'Internal server error'
+      }
+    });
+  }
+});
+
 // Endpoint to refresh Zoho access token
 app.post('/api/refresh-zoho-token', async (req, res) => {
   try {

@@ -73,9 +73,13 @@ app.post('/api/exchange-zoho-code', async (req, res) => {
       code: code,
       client_id: client_id,
       client_secret: client_secret,
-      grant_type: 'authorization_code',
-      ...(redirect_uri && { redirect_uri: redirect_uri })
+      grant_type: 'authorization_code'
     });
+    
+    // Only add redirect_uri if it's provided and not empty
+    if (redirect_uri !== undefined && redirect_uri !== null && redirect_uri !== '') {
+      params.append('redirect_uri', redirect_uri);
+    }
 
     const response = await axios.post(url, params.toString(), {
       headers: {

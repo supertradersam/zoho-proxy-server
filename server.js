@@ -234,25 +234,48 @@ const fetchForexFactoryEventsForDate = async (targetDate) => {
       if (rowClass.includes('high') || rowClass.includes('red')) priority = 'High';
       else if (rowClass.includes('medium') || rowClass.includes('orange') || rowClass.includes('yellow')) priority = 'Medium';
       
-      if (event && event.length > 0) {
+      // Use alternative values if primary ones are empty
+      const finalTime = timeAlt || time || 'TBD';
+      const finalCurrency = currencyAlt || currency || '';
+      const finalEvent = eventAlt || event || '';
+      
+      // Only add if we have an event name
+      if (finalEvent && finalEvent.length > 0 && finalEvent.toLowerCase() !== 'detail') {
+        // Clean up currency - remove extra whitespace
+        const cleanCurrency = finalCurrency.replace(/\s+/g, '').toUpperCase();
+        
         events.push({
           id: `ff_${targetDate}_${index}_${Math.random().toString(36).substr(2, 9)}`,
-          title: event,
-          time: time || 'TBD',
+          title: finalEvent,
+          time: finalTime,
           date: targetDate,
-          currency: currency || 'N/A',
+          currency: cleanCurrency || 'N/A',
           impact: priority,
           actual: actual || '',
           forecast: forecast || '',
           previous: previous || '',
-          description: `${currency || 'N/A'} - ${event}`
+          description: `${cleanCurrency || 'N/A'} - ${finalEvent}`
         });
+        
+        // Debug log for USD events
+        if (cleanCurrency === 'USD' || finalEvent.toUpperCase().includes('USD') || finalEvent.toUpperCase().includes('FOMC') || finalEvent.toUpperCase().includes('FED')) {
+          console.log(`Found USD event: ${finalEvent} (Currency: ${cleanCurrency}, Time: ${finalTime})`);
+        }
       }
     });
     
+    console.log(`Fetched ${events.length} events for ${targetDate}`);
+    if (events.length > 0) {
+      const currencies = [...new Set(events.map(e => e.currency))];
+      console.log(`Currencies found: ${currencies.join(', ')}`);
+    }
     return events;
   } catch (error) {
     console.error(`Error fetching ForexFactory events for ${targetDate}:`, error);
+    if (error.response) {
+      console.error(`Response status: ${error.response.status}`);
+      console.error(`Response data: ${JSON.stringify(error.response.data).substring(0, 500)}`);
+    }
     return [];
   }
 };

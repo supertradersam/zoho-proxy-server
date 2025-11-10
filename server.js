@@ -182,42 +182,103 @@ const fetchForexFactoryEventsForDate = async (targetDate) => {
     const events = [];
     
     // Try multiple selectors for ForexFactory calendar table
+    // Based on actual ForexFactory structure from the screenshot
     const selectors = [
-      '.calendar__row',
-      '.ff-cal-event',
-      'tr.ff-cal-event',
-      'table.calendar tr',
-      '#calendar tr',
+      'table.currencyCalendarTable tbody tr',
+      'table.calendar tbody tr',
+      '#calendar tbody tr',
+      'tbody tr[data-eventid]',
+      'tbody tr',
+      'table tr[data-eventid]',
       'tr[data-eventid]',
-      'tbody tr'
+      'table tr'
     ];
     
     let rows = [];
     for (const selector of selectors) {
       rows = $(selector);
-      if (rows.length > 0) break;
+      if (rows.length > 0) {
+        console.log(`Found ${rows.length} rows using selector: ${selector}`);
+        break;
+      }
+    }
+    
+    // If no rows found, try to find any table rows
+    if (rows.length === 0) {
+      rows = $('tr');
+      console.log(`Fallback: Found ${rows.length} total rows`);
     }
     
     rows.each((index, element) => {
       const $row = $(element);
       
-      // Skip header rows
-      if ($row.hasClass('calendar__row--header') || 
-          $row.find('th').length > 0 ||
-          $row.text().trim().toLowerCase().includes('time') ||
-          $row.text().trim().toLowerCase().includes('currency')) {
+      // Skip header rows - check for th elements or header text
+      const rowText = $row.text().trim().toLowerCase();
+      if ($row.find('th').length > 0 ||
+          $row.hasClass('calendar__row--header') ||
+          (rowText.includes('date') && rowText.includes('time') && rowText.includes('currency')) ||
+          rowText === '' ||
+          rowText === 'detail') {
         return;
       }
       
-      // Try multiple selectors for each field
-      const time = $row.find('.calendar__time, .ff-cal-time, td:first-child').first().text().trim();
-      const currency = $row.find('.calendar__currency, .ff-cal-currency, td:nth-child(2)').first().text().trim();
-      const impactElement = $row.find('.calendar__impact, .ff-cal-impact, td:nth-child(3)').first();
-      const impact = impactElement.attr('class') || impactElement.attr('title') || '';
-      const event = $row.find('.calendar__event, .ff-cal-event-name, td:nth-child(4)').first().text().trim();
-      const actual = $row.find('.calendar__actual, .ff-cal-actual, td:nth-child(5)').first().text().trim();
-      const forecast = $row.find('.calendar__forecast, .ff-cal-forecast, td:nth-child(6)').first().text().trim();
-      const previous = $row.find('.calendar__previous, .ff-cal-previous, td:nth-child(7)').first().text().trim();
+      // ForexFactory table structure: Date | Time | Currency | Impact | Detail | Actual | Forecast | Previous | Graph
+      // Try to get all td elements
+      const cells = $row.find('td');
+      if (cells.length < 4) {
+        return; // Skip rows that don't have enough cells
+      }
+      
+      // Extract data from table cells based on ForexFactory structure
+      // Cell 0: Date (sometimes combined with time)
+      // Cell 1: Time
+      // Cell 2: Currency
+      // Cell 3: Impact (icon/color)
+      // Cell 4: Detail/Event name
+      // Cell 5: Actual
+      // Cell 6: Forecast
+      // Cell 7: Previous
+      
+      let dateCell = cells.eq(0).text().trim();
+      let time = cells.eq(1).text().trim();
+      let currency = cells.eq(2).text().trim();
+      const impactElement = cells.eq(3);
+      let event = cells.eq(4).text().trim();
+      let actual = cells.eq(5).text().trim();
+      let forecast = cells.eq(6).text().trim();
+      let previous = cells.eq(7).text().trim();
+      
+      // If time is empty, try to extract from date cell
+      if (!time && dateCell) {
+        const timeMatch = dateCell.match(/(\d{1,2}:\d{2}(?:am|pm)?|tentative|all day)/i);
+        if (timeMatch) {
+          time = timeMatch[1];
+        }
+      }
+      
+      // Try alternative selectors if cells are empty
+      if (!time) {
+        time = $row.find('.calendar__time, .ff-cal-time, [class*="time"]').first().text().trim();
+      }
+      if (!currency) {
+        currency = $row.find('.calendar__currency, .ff-cal-currency, [class*="currency"]').first().text().trim();
+      }
+      if (!event) {
+        event = $row.find('.calendar__event, .ff-cal-event-name, .event, [class*="event"], [class*="detail"]').first().text().trim();
+      }
+      
+      // Get impact from the impact cell - check for icons/images
+      let impact = '';
+      if (impactElement.length > 0) {
+        // Check for impact icon classes or alt text
+        const impactIcon = impactElement.find('i, img, span').first();
+        impact = impactIcon.attr('class') || 
+                 impactIcon.attr('title') || 
+                 impactIcon.attr('alt') ||
+                 impactElement.attr('class') || 
+                 impactElement.attr('title') || 
+                 '';
+      }
       
       // Determine priority from impact class or color
       let priority = 'Low';
@@ -234,16 +295,13 @@ const fetchForexFactoryEventsForDate = async (targetDate) => {
       if (rowClass.includes('high') || rowClass.includes('red')) priority = 'High';
       else if (rowClass.includes('medium') || rowClass.includes('orange') || rowClass.includes('yellow')) priority = 'Medium';
       
-      // Use alternative values if primary ones are empty
-      const finalTime = timeAlt || time || 'TBD';
-      const finalCurrency = currencyAlt || currency || '';
-      const finalEvent = eventAlt || event || '';
+      // Clean up currency - remove extra whitespace and convert to uppercase
+      const cleanCurrency = currency.replace(/\s+/g, '').toUpperCase();
+      const finalTime = time || 'TBD';
+      const finalEvent = event.trim();
       
       // Only add if we have an event name
       if (finalEvent && finalEvent.length > 0 && finalEvent.toLowerCase() !== 'detail') {
-        // Clean up currency - remove extra whitespace
-        const cleanCurrency = finalCurrency.replace(/\s+/g, '').toUpperCase();
-        
         events.push({
           id: `ff_${targetDate}_${index}_${Math.random().toString(36).substr(2, 9)}`,
           title: finalEvent,
@@ -258,7 +316,9 @@ const fetchForexFactoryEventsForDate = async (targetDate) => {
         });
         
         // Debug log for USD events
-        if (cleanCurrency === 'USD' || finalEvent.toUpperCase().includes('USD') || finalEvent.toUpperCase().includes('FOMC') || finalEvent.toUpperCase().includes('FED')) {
+        if (cleanCurrency === 'USD' || finalEvent.toUpperCase().includes('USD') || 
+            finalEvent.toUpperCase().includes('FOMC') || finalEvent.toUpperCase().includes('FED') ||
+            finalEvent.toUpperCase().includes('US ') || finalEvent.toUpperCase().includes('UNITED STATES')) {
           console.log(`Found USD event: ${finalEvent} (Currency: ${cleanCurrency}, Time: ${finalTime})`);
         }
       }

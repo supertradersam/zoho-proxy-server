@@ -166,13 +166,10 @@ app.post('/api/refresh-zoho-token', async (req, res) => {
   }
 });
 
-// Endpoint to fetch ForexFactory calendar events
-app.get('/api/forexfactory-calendar', async (req, res) => {
+// Helper function to fetch events for a specific date
+const fetchForexFactoryEventsForDate = async (targetDate) => {
   try {
-    const { date } = req.query;
-    const targetDate = date || new Date().toISOString().split('T')[0];
-    
-    // ForexFactory calendar URL
+    // ForexFactory calendar URL - format: YYYY-MM-DD
     const url = `https://www.forexfactory.com/calendar?day=${targetDate}`;
     
     const response = await axios.get(url, {
@@ -185,13 +182,14 @@ app.get('/api/forexfactory-calendar', async (req, res) => {
     const events = [];
     
     // Try multiple selectors for ForexFactory calendar table
-    // ForexFactory uses different class names, so we try multiple patterns
     const selectors = [
       '.calendar__row',
       '.ff-cal-event',
       'tr.ff-cal-event',
       'table.calendar tr',
-      '#calendar tr'
+      '#calendar tr',
+      'tr[data-eventid]',
+      'tbody tr'
     ];
     
     let rows = [];
@@ -206,7 +204,8 @@ app.get('/api/forexfactory-calendar', async (req, res) => {
       // Skip header rows
       if ($row.hasClass('calendar__row--header') || 
           $row.find('th').length > 0 ||
-          $row.text().trim().toLowerCase().includes('time')) {
+          $row.text().trim().toLowerCase().includes('time') ||
+          $row.text().trim().toLowerCase().includes('currency')) {
         return;
       }
       
@@ -237,7 +236,7 @@ app.get('/api/forexfactory-calendar', async (req, res) => {
       
       if (event && event.length > 0) {
         events.push({
-          id: `ff_${index}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          id: `ff_${targetDate}_${index}_${Math.random().toString(36).substr(2, 9)}`,
           title: event,
           time: time || 'TBD',
           date: targetDate,
@@ -251,7 +250,59 @@ app.get('/api/forexfactory-calendar', async (req, res) => {
       }
     });
     
-    return res.json({ events, date: targetDate });
+    return events;
+  } catch (error) {
+    console.error(`Error fetching ForexFactory events for ${targetDate}:`, error);
+    return [];
+  }
+};
+
+// Endpoint to fetch ForexFactory calendar events
+app.get('/api/forexfactory-calendar', async (req, res) => {
+  try {
+    const { date, days } = req.query;
+    
+    // If days parameter is provided, fetch multiple days
+    if (days && days === 'week') {
+      const allEvents = [];
+      const today = new Date();
+      
+      // Fetch today + next 6 days (7 days total)
+      for (let i = 0; i < 7; i++) {
+        const targetDate = new Date(today);
+        targetDate.setDate(today.getDate() + i);
+        const dateStr = targetDate.toISOString().split('T')[0];
+        const events = await fetchForexFactoryEventsForDate(dateStr);
+        allEvents.push(...events);
+        
+        // Small delay to avoid rate limiting
+        if (i < 6) await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
+      return res.json({ events: allEvents, dateRange: 'week' });
+    } else if (days && parseInt(days) > 1) {
+      // Fetch specific number of days
+      const allEvents = [];
+      const startDate = date ? new Date(date) : new Date();
+      
+      for (let i = 0; i < parseInt(days); i++) {
+        const targetDate = new Date(startDate);
+        targetDate.setDate(startDate.getDate() + i);
+        const dateStr = targetDate.toISOString().split('T')[0];
+        const events = await fetchForexFactoryEventsForDate(dateStr);
+        allEvents.push(...events);
+        
+        // Small delay to avoid rate limiting
+        if (i < parseInt(days) - 1) await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
+      return res.json({ events: allEvents, days: parseInt(days) });
+    } else {
+      // Single date fetch (default behavior)
+      const targetDate = date || new Date().toISOString().split('T')[0];
+      const events = await fetchForexFactoryEventsForDate(targetDate);
+      return res.json({ events, date: targetDate });
+    }
   } catch (error) {
     console.error('ForexFactory Calendar Error:', error);
     

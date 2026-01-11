@@ -455,6 +455,50 @@ app.get('/api/market-news', async (req, res) => {
   }
 });
 
+// Endpoint to fetch stock prices (proxy to avoid CORS)
+app.get('/api/stock-price', async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({ error: 'Symbol parameter is required' });
+    }
+    
+    // Try Yahoo Finance API
+    try {
+      const response = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`, {
+        params: {
+          interval: '1d',
+          range: '1d'
+        },
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+      
+      if (response.data && response.data.chart && response.data.chart.result) {
+        const result = response.data.chart.result[0];
+        const price = result.meta.regularMarketPrice;
+        return res.json({ symbol, price, timestamp: new Date().toISOString() });
+      }
+    } catch (yahooError) {
+      console.error('Yahoo Finance API error:', yahooError.message);
+    }
+    
+    // Fallback: Try Alpha Vantage (requires API key - can be added later)
+    // For now, return error
+    return res.status(500).json({ 
+      error: 'Unable to fetch stock price',
+      symbol 
+    });
+  } catch (error) {
+    console.error('Stock Price Error:', error);
+    return res.status(500).json({
+      error: error.message || 'Failed to fetch stock price'
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Zoho Books Proxy Server running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
